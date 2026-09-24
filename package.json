@@ -1,0 +1,12 @@
+{
+  "name": "hexvoice-server",
+  "version": "1.0.0",
+  "description": "HexVoice 6-member voice chat relay server",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}

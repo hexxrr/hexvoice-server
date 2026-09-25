@@ -9,7 +9,7 @@ const server = new WebSocket.Server({
     port: PORT
 });
 
-console.log(`HexVoice server running on port ${PORT}`);
+console.log(`BADsquad server running on port ${PORT}`);
 
 function sendJson(ws, data) {
     if (ws.readyState === WebSocket.OPEN) {
@@ -18,18 +18,15 @@ function sendJson(ws, data) {
 }
 
 function getRoomMembers(room) {
-
     return Array.from(room).map((member) => ({
         id: member.userId,
-        name: member.userName,
-        mic: member.micMuted ? false : true
+        name: member.userName
     }));
 }
 
 function broadcastRoomMembers(room) {
 
-    const members =
-        getRoomMembers(room);
+    const members = getRoomMembers(room);
 
     for (const member of room) {
 
@@ -40,22 +37,42 @@ function broadcastRoomMembers(room) {
     }
 }
 
+function sendJoinNotification(room, joinedUser) {
+
+    const joinedName =
+        joinedUser.userName || "Unknown";
+
+    for (const member of room) {
+
+        // Jo banda abhi join hua hai,
+        // usko apni notification nahi milegi.
+        if (member === joinedUser) {
+            continue;
+        }
+
+        sendJson(member, {
+            type: "join_notification",
+            name: joinedName,
+            title: "BADsquad",
+            message:
+                `${joinedName} has joined BADsquad`
+        });
+    }
+}
+
 function leaveRoom(ws) {
 
-    const roomId =
-        ws.roomId;
+    const roomId = ws.roomId;
 
     if (!roomId) {
         return;
     }
 
-    const room =
-        rooms.get(roomId);
+    const room = rooms.get(roomId);
 
     if (!room) {
 
         ws.roomId = null;
-
         return;
     }
 
@@ -76,6 +93,8 @@ function leaveRoom(ws) {
     }
 
     ws.roomId = null;
+    ws.userId = null;
+    ws.userName = null;
 }
 
 server.on("connection", (ws) => {
@@ -83,11 +102,10 @@ server.on("connection", (ws) => {
     ws.roomId = null;
     ws.userId = null;
     ws.userName = null;
-    ws.micMuted = false;
 
     sendJson(ws, {
         type: "connected",
-        message: "HexVoice server connected"
+        message: "BADsquad server connected"
     });
 
     ws.on("message", (data, isBinary) => {
@@ -101,9 +119,11 @@ server.on("connection", (ws) => {
                         data.toString()
                     );
 
-                if (
-                    message.type === "join"
-                ) {
+                // =========================
+                // JOIN ROOM
+                // =========================
+
+                if (message.type === "join") {
 
                     const roomId =
                         String(
@@ -117,16 +137,14 @@ server.on("connection", (ws) => {
                             message.name || ""
                         )
                             .trim()
-                            .substring(
-                                0,
-                                20
-                            );
+                            .substring(0, 20);
 
                     if (!roomId) {
 
                         sendJson(ws, {
                             type: "error",
-                            message: "Room code missing"
+                            message:
+                                "Room code missing"
                         });
 
                         return;
@@ -136,7 +154,8 @@ server.on("connection", (ws) => {
 
                         sendJson(ws, {
                             type: "error",
-                            message: "Name missing"
+                            message:
+                                "Name missing"
                         });
 
                         return;
@@ -173,57 +192,98 @@ server.on("connection", (ws) => {
                         return;
                     }
 
-                    ws.roomId =
-                        roomId;
+                    ws.roomId = roomId;
 
                     ws.userId =
                         Math.random()
                             .toString(36)
-                            .substring(
-                                2,
-                                10
-                            );
+                            .substring(2, 10);
 
-                    ws.userName =
-                        userName;
-
-                    ws.micMuted =
-                        false;
+                    ws.userName = userName;
 
                     room.add(ws);
 
+                    // =========================
+                    // JOINED USER
+                    // =========================
+
                     sendJson(ws, {
+
                         type: "joined",
+
                         room: roomId,
+
                         name: userName,
+
                         users: room.size,
+
                         maxUsers:
                             MAX_USERS_PER_ROOM
                     });
 
-                    for (
-                        const member of room
-                    ) {
+                    // =========================
+                    // EXISTING USERS
+                    // =========================
 
-                        if (
-                            member !== ws
-                        ) {
+                    for (const member of room) {
 
-                            sendJson(member, {
-                                type: "user_joined",
-                                name: userName,
-                                users: room.size
-                            });
+                        if (member === ws) {
+                            continue;
                         }
+
+                        sendJson(member, {
+
+                            type: "user_joined",
+
+                            name: userName,
+
+                            users: room.size,
+
+                            maxUsers:
+                                MAX_USERS_PER_ROOM
+                        });
                     }
 
-                    broadcastRoomMembers(room);
+                    // =========================
+                    // JOIN NOTIFICATION
+                    // =========================
+                    // Existing users ko
+                    // notification event bhejo.
+
+                    sendJoinNotification(
+                        room,
+                        ws
+                    );
+
+                    // =========================
+                    // UPDATE MEMBER LIST
+                    // =========================
+
+                    broadcastRoomMembers(
+                        room
+                    );
 
                     return;
                 }
 
+                // =========================
+                // LEAVE ROOM
+                // =========================
+
+                if (message.type === "leave") {
+
+                    leaveRoom(ws);
+
+                    return;
+                }
+
+                // =========================
+                // MIC STATUS
+                // =========================
+
                 if (
-                    message.type === "mic_status"
+                    message.type ===
+                    "mic_status"
                 ) {
 
                     if (!ws.roomId) {
@@ -239,19 +299,30 @@ server.on("connection", (ws) => {
                         return;
                     }
 
-                    ws.micMuted =
-                        message.muted === true;
+                    const muted =
+                        Boolean(
+                            message.muted
+                        );
 
-                    broadcastRoomMembers(room);
+                    for (
+                        const member of room
+                    ) {
 
-                    return;
-                }
+                        sendJson(member, {
 
-                if (
-                    message.type === "leave"
-                ) {
+                            type:
+                                "mic_status",
 
-                    leaveRoom(ws);
+                            id:
+                                ws.userId,
+
+                            name:
+                                ws.userName,
+
+                            muted:
+                                muted
+                        });
+                    }
 
                     return;
                 }
@@ -259,13 +330,20 @@ server.on("connection", (ws) => {
             } catch (error) {
 
                 sendJson(ws, {
+
                     type: "error",
-                    message: "Invalid message"
+
+                    message:
+                        "Invalid message"
                 });
             }
 
             return;
         }
+
+        // =========================
+        // VOICE DATA
+        // =========================
 
         if (!ws.roomId) {
             return;
@@ -301,10 +379,12 @@ server.on("connection", (ws) => {
     });
 
     ws.on("close", () => {
+
         leaveRoom(ws);
     });
 
     ws.on("error", () => {
+
         leaveRoom(ws);
     });
 });
@@ -329,6 +409,7 @@ process.on("SIGTERM", () => {
     rooms.clear();
 
     server.close(() => {
+
         process.exit(0);
     });
 });

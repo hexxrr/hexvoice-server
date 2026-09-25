@@ -17,7 +17,31 @@ function sendJson(ws, data) {
   }
 }
 
+function broadcast(room, data, excludeWs = null) {
+  for (const member of room) {
+    if (
+      member !== excludeWs &&
+      member.readyState === WebSocket.OPEN
+    ) {
+      sendJson(member, data);
+    }
+  }
+}
+
+function getUserList(room) {
+  const users = [];
+
+  for (const member of room) {
+    users.push({
+      name: member.userName || "Unknown"
+    });
+  }
+
+  return users;
+}
+
 function leaveRoom(ws) {
+
   const roomId = ws.roomId;
 
   if (!roomId) {
@@ -31,24 +55,32 @@ function leaveRoom(ws) {
     return;
   }
 
+  const leavingName =
+    ws.userName || "Unknown";
+
   room.delete(ws);
 
-  for (const member of room) {
-    sendJson(member, {
-      type: "user_left"
-    });
-  }
+  broadcast(
+    room,
+    {
+      type: "user_left",
+      name: leavingName,
+      users: getUserList(room)
+    }
+  );
 
   if (room.size === 0) {
     rooms.delete(roomId);
   }
 
   ws.roomId = null;
+  ws.userName = null;
 }
 
 server.on("connection", (ws) => {
 
   ws.roomId = null;
+  ws.userName = null;
 
   sendJson(ws, {
     type: "connected",
@@ -58,11 +90,15 @@ server.on("connection", (ws) => {
   ws.on("message", (data, isBinary) => {
 
     if (!isBinary) {
+
       try {
 
-        const message = JSON.parse(
-          data.toString()
-        );
+        const message =
+          JSON.parse(data.toString());
+
+        /*
+         * USER JOIN
+         */
 
         if (message.type === "join") {
 
@@ -71,11 +107,26 @@ server.on("connection", (ws) => {
               .trim()
               .toUpperCase();
 
+          const userName =
+            String(message.name || "")
+              .trim()
+              .substring(0, 20);
+
           if (!roomId) {
 
             sendJson(ws, {
               type: "error",
               message: "Room code missing"
+            });
+
+            return;
+          }
+
+          if (!userName) {
+
+            sendJson(ws, {
+              type: "error",
+              message: "Name missing"
             });
 
             return;
@@ -88,8 +139,13 @@ server.on("connection", (ws) => {
           let room = rooms.get(roomId);
 
           if (!room) {
+
             room = new Set();
-            rooms.set(roomId, room);
+
+            rooms.set(
+              roomId,
+              room
+            );
           }
 
           if (
@@ -99,40 +155,58 @@ server.on("connection", (ws) => {
 
             sendJson(ws, {
               type: "room_full",
-              message: "Room is full. Maximum 6 users."
+              message:
+                "Room is full. Maximum 6 users."
             });
 
             return;
           }
 
-          room.add(ws);
           ws.roomId = roomId;
+          ws.userName = userName;
+
+          room.add(ws);
+
+          /*
+           * Send complete current user list
+           * to the person who just joined.
+           */
 
           sendJson(ws, {
             type: "joined",
             room: roomId,
             users: room.size,
-            maxUsers: MAX_USERS_PER_ROOM
+            maxUsers: MAX_USERS_PER_ROOM,
+            userList: getUserList(room)
           });
 
-          for (const member of room) {
+          /*
+           * Tell everyone else that
+           * this user joined.
+           */
 
-            if (member !== ws) {
-
-              sendJson(member, {
-                type: "user_joined",
-                users: room.size
-              });
-
-            }
-
-          }
+          broadcast(
+            room,
+            {
+              type: "user_joined",
+              name: userName,
+              users: room.size,
+              userList: getUserList(room)
+            },
+            ws
+          );
 
           return;
         }
 
+        /*
+         * LEAVE ROOM
+         */
+
         if (message.type === "leave") {
+
           leaveRoom(ws);
+
           return;
         }
 
@@ -151,15 +225,16 @@ server.on("connection", (ws) => {
     /*
      * Binary data = voice audio.
      *
-     * Relay the audio packet to every
-     * other user in the same room.
+     * Relay audio to every other
+     * user in the same room.
      */
 
     if (!ws.roomId) {
       return;
     }
 
-    const room = rooms.get(ws.roomId);
+    const room =
+      rooms.get(ws.roomId);
 
     if (!room) {
       return;
@@ -169,7 +244,8 @@ server.on("connection", (ws) => {
 
       if (
         member !== ws &&
-        member.readyState === WebSocket.OPEN
+        member.readyState ===
+        WebSocket.OPEN
       ) {
 
         member.send(
@@ -178,11 +254,8 @@ server.on("connection", (ws) => {
             binary: true
           }
         );
-
       }
-
     }
-
   });
 
   ws.on("close", () => {
@@ -192,7 +265,6 @@ server.on("connection", (ws) => {
   ws.on("error", () => {
     leaveRoom(ws);
   });
-
 });
 
 process.on("SIGTERM", () => {
@@ -205,9 +277,7 @@ process.on("SIGTERM", () => {
         ws.close();
       } catch (_) {
       }
-
     }
-
   }
 
   rooms.clear();
@@ -215,5 +285,4 @@ process.on("SIGTERM", () => {
   server.close(() => {
     process.exit(0);
   });
-
 });

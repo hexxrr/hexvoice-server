@@ -18,16 +18,21 @@ function sendJson(ws, data) {
 }
 
 function getRoomMembers(room) {
+
     return Array.from(room).map((member) => ({
         id: member.userId,
-        name: member.userName
+        name: member.userName,
+        mic: member.micMuted ? false : true
     }));
 }
 
 function broadcastRoomMembers(room) {
-    const members = getRoomMembers(room);
+
+    const members =
+        getRoomMembers(room);
 
     for (const member of room) {
+
         sendJson(member, {
             type: "room_members",
             members: members
@@ -37,16 +42,20 @@ function broadcastRoomMembers(room) {
 
 function leaveRoom(ws) {
 
-    const roomId = ws.roomId;
+    const roomId =
+        ws.roomId;
 
     if (!roomId) {
         return;
     }
 
-    const room = rooms.get(roomId);
+    const room =
+        rooms.get(roomId);
 
     if (!room) {
+
         ws.roomId = null;
+
         return;
     }
 
@@ -58,7 +67,6 @@ function leaveRoom(ws) {
             type: "user_left",
             name: ws.userName || "Unknown"
         });
-
     }
 
     broadcastRoomMembers(room);
@@ -75,6 +83,7 @@ server.on("connection", (ws) => {
     ws.roomId = null;
     ws.userId = null;
     ws.userName = null;
+    ws.micMuted = false;
 
     sendJson(ws, {
         type: "connected",
@@ -92,17 +101,26 @@ server.on("connection", (ws) => {
                         data.toString()
                     );
 
-                if (message.type === "join") {
+                if (
+                    message.type === "join"
+                ) {
 
                     const roomId =
-                        String(message.room || "")
+                        String(
+                            message.room || ""
+                        )
                             .trim()
                             .toUpperCase();
 
                     const userName =
-                        String(message.name || "")
+                        String(
+                            message.name || ""
+                        )
                             .trim()
-                            .substring(0, 20);
+                            .substring(
+                                0,
+                                20
+                            );
 
                     if (!roomId) {
 
@@ -161,10 +179,16 @@ server.on("connection", (ws) => {
                     ws.userId =
                         Math.random()
                             .toString(36)
-                            .substring(2, 10);
+                            .substring(
+                                2,
+                                10
+                            );
 
                     ws.userName =
                         userName;
+
+                    ws.micMuted =
+                        false;
 
                     room.add(ws);
 
@@ -177,18 +201,20 @@ server.on("connection", (ws) => {
                             MAX_USERS_PER_ROOM
                     });
 
-                    for (const member of room) {
+                    for (
+                        const member of room
+                    ) {
 
-                        if (member !== ws) {
+                        if (
+                            member !== ws
+                        ) {
 
                             sendJson(member, {
                                 type: "user_joined",
                                 name: userName,
                                 users: room.size
                             });
-
                         }
-
                     }
 
                     broadcastRoomMembers(room);
@@ -196,7 +222,34 @@ server.on("connection", (ws) => {
                     return;
                 }
 
-                if (message.type === "leave") {
+                if (
+                    message.type === "mic_status"
+                ) {
+
+                    if (!ws.roomId) {
+                        return;
+                    }
+
+                    const room =
+                        rooms.get(
+                            ws.roomId
+                        );
+
+                    if (!room) {
+                        return;
+                    }
+
+                    ws.micMuted =
+                        message.muted === true;
+
+                    broadcastRoomMembers(room);
+
+                    return;
+                }
+
+                if (
+                    message.type === "leave"
+                ) {
 
                     leaveRoom(ws);
 
@@ -219,13 +272,17 @@ server.on("connection", (ws) => {
         }
 
         const room =
-            rooms.get(ws.roomId);
+            rooms.get(
+                ws.roomId
+            );
 
         if (!room) {
             return;
         }
 
-        for (const member of room) {
+        for (
+            const member of room
+        ) {
 
             if (
                 member !== ws &&
@@ -254,9 +311,13 @@ server.on("connection", (ws) => {
 
 process.on("SIGTERM", () => {
 
-    for (const room of rooms.values()) {
+    for (
+        const room of rooms.values()
+    ) {
 
-        for (const ws of room) {
+        for (
+            const ws of room
+        ) {
 
             try {
                 ws.close();

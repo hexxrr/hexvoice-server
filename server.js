@@ -25,11 +25,9 @@ function getRoomMembers(room) {
 }
 
 function broadcastRoomMembers(room) {
-
     const members = getRoomMembers(room);
 
     for (const member of room) {
-
         sendJson(member, {
             type: "room_members",
             members: members
@@ -38,14 +36,10 @@ function broadcastRoomMembers(room) {
 }
 
 function sendJoinNotification(room, joinedUser) {
-
     const joinedName =
         joinedUser.userName || "Unknown";
 
     for (const member of room) {
-
-        // Jo banda abhi join hua hai,
-        // usko apni notification nahi milegi.
         if (member === joinedUser) {
             continue;
         }
@@ -60,8 +54,49 @@ function sendJoinNotification(room, joinedUser) {
     }
 }
 
-function leaveRoom(ws) {
+/*
+ * Audio packet format:
+ *
+ * [0x7F]
+ * [senderIdLength]
+ * [senderId UTF-8]
+ * [PCM16 LE audio]
+ *
+ * Isse receiver ko pata chalega
+ * ki voice kis member ki hai.
+ */
+function makeAudioPacket(senderId, pcmData) {
+    const id = Buffer.from(
+        senderId || "",
+        "utf8"
+    );
 
+    const idLength = Math.min(
+        id.length,
+        255
+    );
+
+    const header = Buffer.alloc(
+        2 + idLength
+    );
+
+    header[0] = 0x7F;
+    header[1] = idLength;
+
+    id.copy(
+        header,
+        2,
+        0,
+        idLength
+    );
+
+    return Buffer.concat([
+        header,
+        pcmData
+    ]);
+}
+
+function leaveRoom(ws) {
     const roomId = ws.roomId;
 
     if (!roomId) {
@@ -71,7 +106,6 @@ function leaveRoom(ws) {
     const room = rooms.get(roomId);
 
     if (!room) {
-
         ws.roomId = null;
         return;
     }
@@ -79,7 +113,6 @@ function leaveRoom(ws) {
     room.delete(ws);
 
     for (const member of room) {
-
         sendJson(member, {
             type: "user_left",
             name: ws.userName || "Unknown"
@@ -105,11 +138,15 @@ server.on("connection", (ws) => {
 
     sendJson(ws, {
         type: "connected",
-        message: "BADsquad server connected"
+        message:
+            "BADsquad server connected"
     });
 
     ws.on("message", (data, isBinary) => {
 
+        /*
+         * TEXT / JSON MESSAGE
+         */
         if (!isBinary) {
 
             try {
@@ -119,10 +156,9 @@ server.on("connection", (ws) => {
                         data.toString()
                     );
 
-                // =========================
-                // JOIN ROOM
-                // =========================
-
+                /*
+                 * JOIN ROOM
+                 */
                 if (message.type === "join") {
 
                     const roomId =
@@ -137,7 +173,10 @@ server.on("connection", (ws) => {
                             message.name || ""
                         )
                             .trim()
-                            .substring(0, 20);
+                            .substring(
+                                0,
+                                20
+                            );
 
                     if (!roomId) {
 
@@ -161,6 +200,10 @@ server.on("connection", (ws) => {
                         return;
                     }
 
+                    /*
+                     * Agar already kisi room mein hai
+                     * to pehle leave karwao.
+                     */
                     if (ws.roomId) {
                         leaveRoom(ws);
                     }
@@ -178,13 +221,17 @@ server.on("connection", (ws) => {
                         );
                     }
 
+                    /*
+                     * MAX 6 USERS
+                     */
                     if (
                         room.size >=
                         MAX_USERS_PER_ROOM
                     ) {
 
                         sendJson(ws, {
-                            type: "room_full",
+                            type:
+                                "room_full",
                             message:
                                 "Room is full. Maximum 6 users."
                         });
@@ -192,21 +239,27 @@ server.on("connection", (ws) => {
                         return;
                     }
 
+                    /*
+                     * USER ID
+                     */
                     ws.roomId = roomId;
 
                     ws.userId =
                         Math.random()
                             .toString(36)
-                            .substring(2, 10);
+                            .substring(
+                                2,
+                                10
+                            );
 
-                    ws.userName = userName;
+                    ws.userName =
+                        userName;
 
                     room.add(ws);
 
-                    // =========================
-                    // JOINED USER
-                    // =========================
-
+                    /*
+                     * JOINED RESPONSE
+                     */
                     sendJson(ws, {
 
                         type: "joined",
@@ -215,50 +268,53 @@ server.on("connection", (ws) => {
 
                         name: userName,
 
-                        users: room.size,
+                        users:
+                            room.size,
 
                         maxUsers:
                             MAX_USERS_PER_ROOM
                     });
 
-                    // =========================
-                    // EXISTING USERS
-                    // =========================
+                    /*
+                     * Notify existing users
+                     */
+                    for (
+                        const member of room
+                    ) {
 
-                    for (const member of room) {
-
-                        if (member === ws) {
+                        if (
+                            member === ws
+                        ) {
                             continue;
                         }
 
                         sendJson(member, {
 
-                            type: "user_joined",
+                            type:
+                                "user_joined",
 
-                            name: userName,
+                            name:
+                                userName,
 
-                            users: room.size,
+                            users:
+                                room.size,
 
                             maxUsers:
                                 MAX_USERS_PER_ROOM
                         });
                     }
 
-                    // =========================
-                    // JOIN NOTIFICATION
-                    // =========================
-                    // Existing users ko
-                    // notification event bhejo.
-
+                    /*
+                     * Join notification
+                     */
                     sendJoinNotification(
                         room,
                         ws
                     );
 
-                    // =========================
-                    // UPDATE MEMBER LIST
-                    // =========================
-
+                    /*
+                     * Updated member list
+                     */
                     broadcastRoomMembers(
                         room
                     );
@@ -266,21 +322,22 @@ server.on("connection", (ws) => {
                     return;
                 }
 
-                // =========================
-                // LEAVE ROOM
-                // =========================
-
-                if (message.type === "leave") {
+                /*
+                 * LEAVE ROOM
+                 */
+                if (
+                    message.type ===
+                    "leave"
+                ) {
 
                     leaveRoom(ws);
 
                     return;
                 }
 
-                // =========================
-                // MIC STATUS
-                // =========================
-
+                /*
+                 * MIC STATUS
+                 */
                 if (
                     message.type ===
                     "mic_status"
@@ -329,6 +386,11 @@ server.on("connection", (ws) => {
 
             } catch (error) {
 
+                console.error(
+                    "JSON error:",
+                    error
+                );
+
                 sendJson(ws, {
 
                     type: "error",
@@ -341,10 +403,9 @@ server.on("connection", (ws) => {
             return;
         }
 
-        // =========================
-        // VOICE DATA
-        // =========================
-
+        /*
+         * BINARY AUDIO DATA
+         */
         if (!ws.roomId) {
             return;
         }
@@ -358,6 +419,20 @@ server.on("connection", (ws) => {
             return;
         }
 
+        /*
+         * Audio ko sender ID ke saath
+         * wrap karo.
+         */
+        const audioPacket =
+            makeAudioPacket(
+                ws.userId,
+                data
+            );
+
+        /*
+         * Room ke baaki sab users ko
+         * audio bhejo.
+         */
         for (
             const member of room
         ) {
@@ -369,7 +444,7 @@ server.on("connection", (ws) => {
             ) {
 
                 member.send(
-                    data,
+                    audioPacket,
                     {
                         binary: true
                     }
@@ -378,17 +453,33 @@ server.on("connection", (ws) => {
         }
     });
 
+    /*
+     * CONNECTION CLOSED
+     */
     ws.on("close", () => {
 
         leaveRoom(ws);
+
     });
 
-    ws.on("error", () => {
+    /*
+     * CONNECTION ERROR
+     */
+    ws.on("error", (error) => {
+
+        console.error(
+            "WebSocket error:",
+            error
+        );
 
         leaveRoom(ws);
+
     });
 });
 
+/*
+ * Render shutdown handling
+ */
 process.on("SIGTERM", () => {
 
     for (
@@ -400,7 +491,9 @@ process.on("SIGTERM", () => {
         ) {
 
             try {
+
                 ws.close();
+
             } catch (_) {
             }
         }
@@ -411,5 +504,6 @@ process.on("SIGTERM", () => {
     server.close(() => {
 
         process.exit(0);
+
     });
 });
